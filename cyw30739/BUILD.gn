@@ -1,0 +1,153 @@
+# Copyright (c) 2020 Project CHIP Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build_overrides/chip.gni")
+import("//build_overrides/mbedtls.gni")
+import("//build_overrides/openthread.gni")
+
+import("${chip_root}/src/platform/Infineon/CYW30739/cyw30739_platform.gni")
+import("${mbedtls_root}/mbedtls.gni")
+import("cyw30739_executable.gni")
+import("cyw30739_sdk.gni")
+
+template("cyw30739_chip") {
+  forward_variables_from(invoker, [ "chip" ])
+
+  chip_dir = "repos/${chip}/COMPONENT_${chip}"
+  scripts_dir = "${chip_dir}/make/scripts"
+
+  action("gen_lib_installer-${chip}") {
+    lib_installer_file = "${target_gen_dir}/lib_installer-${chip}.c"
+
+    script_file = "${scripts_dir}/wiced-gen-lib-installer.pl"
+
+    script = "${build_root}/gn_run_binary.py"
+
+    inputs = [ script_file ]
+
+    outputs = [ lib_installer_file ]
+
+    args = [
+      "perl",
+      "-I",
+      rebase_path(scripts_dir, root_build_dir),
+      rebase_path(script_file, root_build_dir),
+      rebase_path(lib_installer_file, root_build_dir),
+    ]
+  }
+
+  static_library(target_name) {
+    sources = get_target_outputs(":gen_lib_installer-${chip}")
+
+    deps = [ ":gen_lib_installer-${chip}" ]
+  }
+
+  static_library("mbedtls-${chip}") {
+    wpan_sdk_mbedtls_dir = "../repos/wpan-sdk/pal/mbedtls"
+    sources = [
+      "${wpan_sdk_mbedtls_dir}/source/aes_alt.c",
+      "${wpan_sdk_mbedtls_dir}/source/ccm_alt.c",
+      "${wpan_sdk_mbedtls_dir}/source/ecp_alt.c",
+      "${wpan_sdk_mbedtls_dir}/source/platform_alt.c",
+      "${wpan_sdk_mbedtls_dir}/source/sha256_alt.c",
+    ]
+
+    configs += [ "..:wpan_sdk-cyw30739-config" ]
+
+    deps = [ ":mbedtls" ]
+  }
+
+  copy("${chip}_hdf") {
+    sources = [ "${chip_dir}/internal/${chip}/configdef${chip}.hdf" ]
+    outputs = [ "${root_out_dir}/{{source_file_part}}" ]
+  }
+
+  copy("${chip}_hci_id") {
+    sources = [ "${chip_dir}/platforms/IDFILE.txt" ]
+    outputs = [ "${root_out_dir}/{{source_name_part}}_${chip}.txt" ]
+  }
+
+  copy("${chip}_minidriver") {
+    sources = [ "${chip_dir}/platforms/minidriver.hex" ]
+    outputs = [ "${root_out_dir}/{{source_name_part}}_${chip}.hex" ]
+  }
+}
+
+config("specs-config") {
+  cflags = [
+    "--specs=nosys.specs",
+    "--specs=nano.specs",
+  ]
+
+  libs = [ "nosys" ]
+
+  ldflags = cflags
+}
+
+config("cyw30739_sdk_no_warn_rwx") {
+  ldflags = [ "-Wl,--no-warn-rwx-segment" ]
+}
+
+group("cyw30739_sdk") {
+  public_deps = [
+    "..:matter_wpan_sdk",
+    "..:wpan_sdk-cyw30739",
+  ]
+
+  all_dependent_configs = [ ":cyw30739_sdk_no_warn_rwx" ]
+}
+
+config("mbedtls_cyw30739_config") {
+  defines = [
+    "MBEDTLS_CONFIG_FILE=<third_party/openthread/repo/third_party/mbedtls/mbedtls-config.h>",
+    "MBEDTLS_USER_CONFIG_FILE=<src/platform/Infineon/CYW30739/cyw30739-chip-mbedtls-config.h>",
+  ]
+
+  include_dirs = [ chip_root ]
+}
+
+mbedtls_target("mbedtls") {
+  public_configs = [
+    "..:wpan_sdk-config",
+    "..:wpan_sdk-cyw30739-config",
+    "..:wpan_sdk-pal-mbedtls-config",
+    ":mbedtls_cyw30739_config",
+  ]
+
+  public_deps = [ "${openthread_root}/src/core:libopenthread_core_headers" ]
+}
+
+# Copy flashing dependencies to the output directory so that the output
+# is collectively self-contained; this allows flashing to work reliably
+# even if the build and flashing steps take place on different machines
+# or in different containers.
+copy("flashing_runtime") {
+  sources = flashing_script_inputs
+  outputs = [ "${root_out_dir}/{{source_file_part}}" ]
+}
+
+chip_list = [
+  "30739A0",
+  "30739B2",
+]
+
+foreach(chip, chip_list) {
+  import("chips/${chip}.gni")
+
+  cyw30739_chip(chip) {
+  }
+
+  cyw30739_platform("platform-${chip}") {
+  }
+}

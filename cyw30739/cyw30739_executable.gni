@@ -1,0 +1,114 @@
+# Copyright (c) 2020 Project CHIP Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build_overrides/build.gni")
+import("//build_overrides/chip.gni")
+import("//build_overrides/cyw30739_sdk.gni")
+
+import("${build_root}/toolchain/flashable_executable.gni")
+import("${cyw30739_sdk_build_root}/cyw30739_sdk.gni")
+
+declare_args() {
+  flashing_script_inputs = [
+    "${chip_root}/scripts/flashing/cyw30739_firmware_utils.py",
+    "${chip_root}/scripts/flashing/firmware_utils.py",
+  ]
+}
+
+template("cyw30739_executable") {
+  forward_variables_from(invoker,
+                         [
+                           "board",
+                           "btp",
+                           "chip",
+                         ])
+
+  chip_dir = "${cyw30739_sdk_build_root}/repos/${chip}/COMPONENT_${chip}"
+  patch_dir =
+      "${chip_dir}/internal/${chip}/patches_" + string_replace(board, "-", "_")
+  patch_sym_file = "${patch_dir}/patch.sym"
+  platform_dir = "${chip_dir}/platforms"
+  scripts_dir = "${chip_dir}/make/scripts"
+
+  if (!defined(invoker.output_name)) {
+    invoker.output_name = "${target_name}.elf"
+  }
+
+  if (!defined(invoker.output_dir)) {
+    invoker.output_dir = root_out_dir
+  }
+
+  output_base_name = get_path_info(invoker.output_name, "name")
+  ldscript_file = "${root_build_dir}/${output_base_name}.ld"
+  flashable_target = "${target_name}.flashable"
+  pre_build_target = "${target_name}.pre_build"
+  post_build_target = "${target_name}.post_build"
+
+  cyw30739_sdk_pre_build(pre_build_target) {
+    forward_variables_from(invoker,
+                           [
+                             "patch_sym_file",
+                             "scripts_dir",
+                           ])
+  }
+
+  cyw30739_sdk_post_build(post_build_target) {
+    forward_variables_from(invoker,
+                           [
+                             "board_use_external_flash",
+                             "board_external_flash_ota_upgrade_size",
+                             "patch_dir",
+                             "platform_dir",
+                             "scripts_dir",
+                           ])
+    executable_target = "${flashable_target}.executable"
+  }
+
+  group(target_name) {
+    deps = [
+      ":${flashable_target}",
+      ":${post_build_target}",
+    ]
+  }
+
+  flashing_script_generator =
+      "${chip_root}/scripts/flashing/gen_flashing_script.py"
+  flashing_script_name = output_base_name + ".flash.py"
+  flashing_options = [
+    "cyw30739",
+    "--sdk-scripts-dir",
+    rebase_path(scripts_dir),
+    "--sdk-tools-dir",
+    rebase_path(invoker.btsdk_sdk_tools_dir),
+    "--hci_id",
+    "IDFILE_${chip}.txt",
+    "--btp",
+    "${output_base_name}.btp",
+    "--minidriver",
+    "minidriver_${chip}.hex",
+    "--flags",
+    "chipload_flags.txt",
+  ]
+
+  flashable_executable(flashable_target) {
+    forward_variables_from(invoker, "*")
+    data_deps = [ "${cyw30739_sdk_build_root}:flashing_runtime" ]
+
+    deps += [ ":${pre_build_target}" ]
+
+    inputs = [ ldscript_file ]
+
+    ldflags = [ "-T" + rebase_path(ldscript_file, root_build_dir) ]
+  }
+}

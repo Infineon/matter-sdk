@@ -1,0 +1,93 @@
+# Copyright (c) 2023 Project CHIP Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build_overrides/chip.gni")
+import("//build_overrides/cyw30739_sdk.gni")
+
+declare_args() {
+  # A human readable name of the vendor.
+  matter_vendor_name = "Infineon"
+
+  # A 16-bit vendor identifier.
+  matter_vendor_id = "0x1388"
+
+  # A human readable name of the product.
+  matter_product_name = "TEST_PRODUCT"
+
+  # A 16-bit product identifier.
+  matter_product_id = "0x0001"
+
+  # A human readable serial number.
+  matter_serial_number = "TEST_SN"
+
+  # A 16-bit hardware version number.
+  matter_hardware_version = 30739
+
+  # A human readable hardware version number.
+  matter_hardware_version_string = "30739"
+
+  # A 27-bit unsigned integer, which encodes an 8-digit decimal numeric value.
+  matter_passcode = 20202021
+
+  # A 12-bit unsigned integer that identifies the Matter device.
+  matter_discriminator = 3840
+
+  # The PAKE iteration count associated with the PAKE passcode verifier. (1000 to 100000)
+  matter_pake_iteration_count = 1000
+
+  # the PAKE salt associated with the PAKE passcode verifier. (16 to 32 bytes)
+  matter_pake_salt = ""
+
+  # Matter attestation certificate file which contain PAI, DAC and DAC key in the PKCS#12 format.
+  matter_att_cert = ""
+
+  # Matter attestation certificate file password.
+  matter_att_cert_password = ""
+
+  # Matter Certification Declaration in the DER format.
+  matter_cd = "${chip_root}/examples/platform/infineon/credentials/development/certification-declaration/Matter-Development-CD-1388-0001-0008.der"
+
+  # Supported board list
+  matter_wpan_sdk_board_list = []
+}
+
+matter_wpan_sdk_script_dir = "${matter_wpan_sdk_build_root}/scripts"
+
+mtb_tools_path =
+    exec_script("${matter_wpan_sdk_script_dir}/find_mtb_tools_path.py",
+                [],
+                "string")
+assert(mtb_tools_path != "",
+       "Unable to find available ModusToolbox tool path. (CY_TOOLS_PATHS)")
+
+btsdk_sdk_tools_dir = "${matter_wpan_sdk_build_root}/repos/btsdk-tools/"
+if (host_os == "linux") {
+  btsdk_sdk_tools_dir += "Linux64"
+} else if (host_os == "mac") {
+  btsdk_sdk_tools_dir += "OSX"
+} else if (host_os == "win") {
+  btsdk_sdk_tools_dir += "Windows"
+}
+
+pake_args = [
+  "--passcode",
+  "${matter_passcode}",
+  "--salt",
+  matter_pake_salt,
+  "--iteration-count",
+  "${matter_pake_iteration_count}",
+]
+pake = exec_script("${matter_wpan_sdk_script_dir}/gen_pake_verifier.py",
+                   pake_args,
+                   "scope")

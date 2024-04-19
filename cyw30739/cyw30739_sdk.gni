@@ -1,0 +1,430 @@
+# Copyright (c) 2020 Project CHIP Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build_overrides/build.gni")
+import("//build_overrides/chip.gni")
+import("//build_overrides/cyw30739_sdk.gni")
+
+import("${matter_wpan_sdk_build_root}/matter_wpan_sdk.gni")
+
+cyw30739_sdk_btp_file = "${cyw30739_sdk_build_root}/flash.btp"
+
+btp_reader_args =
+    [ "--btp=" + rebase_path(cyw30739_sdk_btp_file, root_build_dir) ]
+
+btp_ota_disabled = exec_script("${matter_wpan_sdk_script_dir}/btp_reader.py",
+                               btp_reader_args,
+                               "json",
+                               [ cyw30739_sdk_btp_file ])
+
+btp_reader_args += [ "--enable_ota" ]
+btp_ota_enabled = exec_script("${matter_wpan_sdk_script_dir}/btp_reader.py",
+                              btp_reader_args,
+                              "json",
+                              [ cyw30739_sdk_btp_file ])
+
+cyw30739_sdk_crt_entry = "spar_crt_setup"
+
+template("cyw30739_sdk_pre_build") {
+  forward_variables_from(invoker, [ "btp" ])
+
+  action(target_name) {
+    script_file = "${matter_wpan_sdk_script_dir}/wiced-gen-ld.pl"
+
+    script = "${build_root}/gn_run_binary.py"
+
+    inputs = [
+      "${matter_wpan_sdk_script_dir}/btp_reader.py",
+      script_file,
+    ]
+
+    sources = [
+      cyw30739_sdk_btp_file,
+      invoker.patch_sym_file,
+    ]
+
+    outputs = [ invoker.ldscript_file ]
+
+    args = [
+      "perl",
+      "-I",
+      rebase_path(invoker.scripts_dir, root_build_dir),
+      rebase_path(script_file, root_build_dir),
+      "FLASH0_BEGIN_ADDR=${btp.DLConfigSSLocation}",
+      "FLASH0_LENGTH=0x00100000",
+      "XIP_DS_OFFSET=${btp.ConfigXS1DS1Offset}",
+      "XIP_LEN=${btp.ConfigXS1Length}",
+      "SRAM_BEGIN_ADDR=0x00200000",
+      "SRAM_LENGTH=0x00070000",
+      "AON_AREA_END=0x00284000",
+      "ISTATIC_BEGIN=0x500C00",
+      "ISTATIC_LEN=0x400",
+      "NUM_PATCH_ENTRIES=256",
+      "BTP=" + rebase_path(cyw30739_sdk_btp_file, root_build_dir),
+      rebase_path(invoker.patch_sym_file, root_build_dir),
+      "out=" + rebase_path(invoker.ldscript_file, root_build_dir),
+    ]
+  }
+}
+
+template("cyw30739_sdk_post_build") {
+  forward_variables_from(invoker,
+                         [
+                           "btp",
+                           "chip",
+                         ])
+
+  output_base_path = "${root_out_dir}/${invoker.output_base_name}"
+  elf = "${output_base_path}.elf"
+  hex = "${output_base_path}.hex"
+  ss_hex = "${output_base_path}.ss.hex"
+  ds_hex = "${output_base_path}.ds.hex"
+  xs_hex = "${output_base_path}.xs.hex"
+  ss_hdf = "${output_base_path}.ss.hdf"
+  ss_skeleton_hex = "${output_base_path}.ss_skeleton.hex"
+  empty_cgs = "${output_base_path}.empty.cgs"
+  cgs = "${output_base_path}.cgs"
+  cx_cgs = "${output_base_path}.cx.cgs"
+  hdf = "${root_out_dir}/configdef${chip}.hdf"
+
+  patched_cgs_args =
+      exec_script("${build_root}/gn_run_binary.py",
+                  [
+                    "perl",
+                    rebase_path("${invoker.scripts_dir}/wiced-bdaddr.pl",
+                                root_build_dir),
+                    "${chip}",
+                    rebase_path(cyw30739_sdk_btp_file, root_build_dir),
+                    "-O",
+                    "DLConfigBD_ADDRBase:default",
+                  ],
+                  "list lines",
+                  [ "${invoker.scripts_dir}/wiced-bdaddr.pl" ])
+
+  cgs_args = []
+  foreach(arg, patched_cgs_args) {
+    cgs_args += string_split(arg)
+  }
+
+  group(target_name) {
+    deps = [
+      ":${target_name}_merge_hex",
+      ":${target_name}_ota_image",
+    ]
+
+    data_deps = [
+      ":${target_name}_btp",
+      ":${target_name}_disassemble",
+      "${cyw30739_sdk_build_root}:${chip}_hci_id",
+      "${cyw30739_sdk_build_root}:${chip}_minidriver",
+    ]
+  }
+
+  action("${target_name}_merge_hex") {
+    script = "${matter_wpan_sdk_script_dir}/merge_hex.py"
+
+    outputs = [ hex ]
+
+    sources = [
+      ds_hex,
+      ss_hex,
+      xs_hex,
+    ]
+
+    args = [
+      "--output=" + rebase_path(hex, root_build_dir),
+      "--ss_hex=" + rebase_path(ss_hex, root_build_dir),
+      "--ds_hex=" + rebase_path(ds_hex, root_build_dir),
+      "--xs_hex=" + rebase_path(xs_hex, root_build_dir),
+    ]
+
+    deps = [
+      ":${invoker.target_name}_gen_ds_hex",
+      ":${invoker.target_name}_gen_ss_hex",
+      ":${invoker.target_name}_gen_xs_hex",
+    ]
+  }
+
+  action("${target_name}_gen_ss_hex") {
+    config_header =
+        "${chip_root}/src/platform/Infineon/CYW30739/CYW30739Config.h"
+
+    script = "${matter_wpan_sdk_script_dir}/gen_ss_hex.py"
+
+    outputs = [ ss_hex ]
+
+    sources = [
+      config_header,
+      matter_att_cert,
+      matter_cd,
+      ss_skeleton_hex,
+    ]
+
+    args = [
+      "--output=" + rebase_path(ss_hex, root_build_dir),
+      "--ss_skeleton_hex=" + rebase_path(ss_skeleton_hex, root_build_dir),
+      "--att_cert=" + rebase_path(matter_att_cert, root_build_dir),
+      "--config_header=" + rebase_path(config_header, root_build_dir),
+      "--config=VendorName:string:${matter_vendor_name}",
+      "--config=VendorId:uint16:${matter_vendor_id}",
+      "--config=ProductName:string:${matter_product_name}",
+      "--config=ProductId:uint16:${matter_product_id}",
+      "--config=SerialNum:string:${matter_serial_number}",
+      "--config=HardwareVersion:uint16:${matter_hardware_version}",
+      "--config=HardwareVersionString:string:${matter_hardware_version_string}",
+      "--config=SetupPinCode:uint32:${matter_passcode}",
+      "--config=SetupDiscriminator:uint16:${matter_discriminator}",
+      "--config=Spake2pIterationCount:uint32:${matter_pake_iteration_count}",
+      "--config=Spake2pSalt:base64:${pake.salt}",
+      "--config=Spake2pVerifier:base64:${pake.verifier}",
+      "--config=DAC:att-cert:dac",
+      "--config=DACKey:att-cert:dac-key",
+      "--config=PAICert:att-cert:pai-cert",
+      "--config=CertDeclaration:octets:" +
+          rebase_path(matter_cd, root_build_dir),
+    ]
+    foreach(arg, cgs_args) {
+      options = []
+      options = string_split(arg, ":")
+      if (options[0] == "DLConfigBD_ADDRBase") {
+        args += [ "--config=ExtendedAddress:address:" + options[1] ]
+      }
+    }
+    if (matter_att_cert_password != "") {
+      args += [ "--att_cert_password=" + matter_att_cert_password ]
+    }
+
+    deps = [ ":${invoker.target_name}_gen_ss_skeleton_hex" ]
+  }
+
+  action("${target_name}_gen_ss_skeleton_hex") {
+    script = "${build_root}/gn_run_binary.py"
+
+    outputs = [ ss_skeleton_hex ]
+
+    sources = [
+      cyw30739_sdk_btp_file,
+      empty_cgs,
+    ]
+
+    args = [
+      rebase_path("${btsdk_sdk_tools_dir}/CGS/cgs", root_build_dir),
+      "-D",
+      rebase_path(root_out_dir, root_build_dir),
+      "-I",
+      rebase_path(ss_skeleton_hex, root_build_dir),
+      "-B",
+      rebase_path(cyw30739_sdk_btp_file, root_build_dir),
+      "--cgs-files",
+      rebase_path(empty_cgs, root_build_dir),
+    ]
+    args += cgs_args
+
+    deps = [ ":${invoker.target_name}_gen_ss_cgs" ]
+  }
+
+  action("${target_name}_gen_ds_hex") {
+    cgs_map = "${cgs}.map"
+    script = "${build_root}/gn_run_binary.py"
+
+    outputs = [
+      cgs_map,
+      ds_hex,
+    ]
+
+    sources = [
+      cx_cgs,
+      cyw30739_sdk_btp_file,
+    ]
+
+    inputs = [ hdf ]
+
+    args = [
+      rebase_path("${btsdk_sdk_tools_dir}/CGS/cgs", root_build_dir),
+      "-D",
+      rebase_path(root_out_dir, root_build_dir),
+      "-M",
+      rebase_path(cgs_map, root_build_dir),
+      "-I",
+      rebase_path(ds_hex, root_build_dir),
+      "-B",
+      rebase_path(cyw30739_sdk_btp_file, root_build_dir),
+      "--cgs-files",
+      rebase_path(cx_cgs, root_build_dir),
+      "--paramoverride",
+      "DLConfigFixedHeader:0",
+    ]
+
+    deps = [
+      ":${invoker.target_name}_compress_cgs_data",
+      "${cyw30739_sdk_build_root}:${chip}_hdf",
+    ]
+  }
+
+  action("${target_name}_gen_xs_hex") {
+    script = "${build_root}/gn_run_binary.py"
+
+    outputs = [ xs_hex ]
+
+    sources = [ elf ]
+
+    args = [
+      "arm-none-eabi-objcopy",
+      "--only-section=.app_xip_area",
+      "--output-target=ihex",
+      rebase_path(elf, root_build_dir),
+      rebase_path(xs_hex, root_build_dir),
+    ]
+
+    deps = [ ":${invoker.executable_target}" ]
+  }
+
+  action("${target_name}_compress_cgs_data") {
+    script = "${matter_wpan_sdk_script_dir}/compress_cgs_data.py"
+
+    outputs = [ cx_cgs ]
+
+    sources = [ cgs ]
+
+    args = [
+      "--output=" + rebase_path(cx_cgs, root_build_dir),
+      "--input=" + rebase_path(cgs, root_build_dir),
+      "--lzss_tool=" +
+          rebase_path(btsdk_sdk_tools_dir + "/lzss/lzss", root_build_dir),
+    ]
+
+    deps = [ ":${invoker.target_name}_gen_cgs" ]
+  }
+
+  action("${target_name}_gen_ss_cgs") {
+    script = "${matter_wpan_sdk_script_dir}/gen_ss_cgs.py"
+
+    outputs = [
+      ss_hdf,
+      empty_cgs,
+    ]
+
+    args = [
+      "--ss_hdf=" + rebase_path(ss_hdf, root_build_dir),
+      "--empty_cgs=" + rebase_path(empty_cgs, root_build_dir),
+    ]
+  }
+
+  action("${target_name}_gen_cgs") {
+    script_file = "${invoker.scripts_dir}/wiced-gen-cgs.pl"
+
+    script = "${build_root}/gn_run_binary.py"
+
+    inputs = [ script_file ]
+
+    sources = [
+      "${invoker.patch_dir}/patch.cgs",
+      "${invoker.platform_dir}/platform.cgs",
+      "${invoker.platform_dir}/platform_xip.cgs",
+      cyw30739_sdk_btp_file,
+      elf,
+      hdf,
+      invoker.ldscript_file,
+    ]
+
+    outputs = [ cgs ]
+
+    args = [
+      "perl",
+      "-I",
+      rebase_path(invoker.scripts_dir, root_build_dir),
+      rebase_path(script_file, root_build_dir),
+      "${cyw30739_sdk_crt_entry}.entry",
+      "out=" + rebase_path(cgs, root_build_dir),
+    ]
+    foreach(source, sources) {
+      args += [ rebase_path(source, root_build_dir) ]
+    }
+
+    deps = [
+      ":${invoker.executable_target}",
+      ":${invoker.pre_build_target}",
+      "${cyw30739_sdk_build_root}:${chip}_hdf",
+    ]
+  }
+
+  action("${target_name}_disassemble") {
+    asm = "${output_base_path}.asm"
+
+    script = "${build_root}/gn_run_binary.py"
+
+    outputs = [ asm ]
+
+    sources = [ elf ]
+
+    args = [
+      "bash",
+      "--norc",
+      "--noprofile",
+      "-c",
+      "arm-none-eabi-objdump --disassemble " +
+          rebase_path(elf, root_build_dir) + " > " +
+          rebase_path(asm, root_build_dir),
+    ]
+
+    deps = [ ":${invoker.executable_target}" ]
+  }
+
+  copy("${target_name}_btp") {
+    sources = [ "${cyw30739_sdk_btp_file}" ]
+    outputs = [ "${output_base_path}.btp" ]
+  }
+
+  write_file("${root_out_dir}/chipload_flags.txt", "-NOHCIRESET")
+
+  action("${target_name}_ota_image") {
+    script = "${matter_wpan_sdk_script_dir}/gen_ota_image.py"
+
+    binary = "${output_base_path}.bin"
+
+    if (invoker.board_use_external_flash) {
+      upgrade_xs_len = invoker.board_external_flash_ota_upgrade_size
+    } else {
+      upgrade_xs_len = btp.ConfigXS2Length
+    }
+
+    outputs = [ binary ]
+
+    sources = [
+      ds_hex,
+      xs_hex,
+    ]
+
+    args = [
+      "--binary=" + rebase_path(binary, root_build_dir),
+      "--ds_hex=" + rebase_path(ds_hex, root_build_dir),
+      "--xs_hex=" + rebase_path(xs_hex, root_build_dir),
+      "--lzss_tool=" +
+          rebase_path(btsdk_sdk_tools_dir + "/lzss/lzss", root_build_dir),
+      "--active_xs_len=${btp.ConfigXS1Length}",
+      "--upgrade_xs_len=${upgrade_xs_len}",
+      "--project_config=" +
+          rebase_path("//include/CHIPProjectConfig.h", root_build_dir),
+      "--ota_image_tool=" +
+          rebase_path("${chip_root}/src/app/ota_image_tool.py", root_build_dir),
+      "--vendor_id=${matter_vendor_id}",
+      "--product_id=${matter_product_id}",
+    ]
+
+    deps = [
+      ":${invoker.target_name}_gen_ds_hex",
+      ":${invoker.target_name}_gen_xs_hex",
+    ]
+  }
+}

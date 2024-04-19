@@ -1,0 +1,47 @@
+[submodule "30739A0"]
+	path = cyw30739/repos/30739A0
+    url = https://github.com/Infineon/OT-Matter-30739A0.git
+	branch = master
+[submodule "30739B2"]
+	path = cyw30739/repos/30739B2
+    url = https://github.com/Infineon/OT-Matter-30739B2.git
+	branch = master
+[submodule "CYW30739B2-P5-EVK-01"]
+	path = cyw30739/repos/CYW30739B2-P5-EVK-01
+	url = https://github.com/Infineon/OT-Matter-BSP.git
+	branch = CYW30739B2-P5-EVK-01
+[submodule "CYW30739B2-P5-EVK-02"]
+	path = cyw30739/repos/CYW30739B2-P5-EVK-02
+	url = https://github.com/Infineon/OT-Matter-BSP.git
+	branch = CYW30739B2-P5-EVK-02
+[submodule "CYW30739B2-P5-EVK-03"]
+	path = cyw30739/repos/CYW30739B2-P5-EVK-03
+	url = https://github.com/Infineon/OT-Matter-BSP.git
+	branch = CYW30739B2-P5-EVK-03
+[submodule "CYW930739M2EVB-01"]
+	path = cyw30739/repos/CYW930739M2EVB-01
+	url = https://github.com/Infineon/OT-Matter-BSP.git
+	branch = CYW930739M2EVB-01
+[submodule "CYW930739M2EVB-02"]
+	path = cyw30739/repos/CYW930739M2EVB-02
+	url = https://github.com/Infineon/OT-Matter-BSP.git
+	branch = CYW930739M2EVB-02
+[submodule "btsdk-tools"]
+	path = repos/btsdk-tools
+	url = https://github.com/Infineon/btsdk-tools.git
+[submodule "btsdk-include"]
+	path = repos/btsdk-include
+	url = https://github.com/Infineon/btsdk-include.git
+[submodule "display-oled-ssd1306"]
+	path = repos/display-oled-ssd1306
+	url = https://github.com/Infineon/display-oled-ssd1306.git
+[submodule "emwin"]
+	path = repos/emwin
+	url = https://github.com/Infineon/emwin.git
+[submodule "optiga-trust-m"]
+	path = repos/optiga-trust-m
+	url = https://github.com/Infineon/optiga-trust-m.git
+[submodule "wpan-sdk"]
+	path = repos/wpan-sdk
+	url = https://github.com/Infineon/wpan-sdk.git
+	branch = main

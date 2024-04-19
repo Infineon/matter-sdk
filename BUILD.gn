@@ -1,0 +1,425 @@
+# Copyright (c) 2023 Project CHIP Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build_overrides/chip.gni")
+
+import("${chip_root}/third_party/openthread/platforms/ifx/ifx_openthread.gni")
+import("cyw30739/cyw30739_sdk.gni")
+import("matter_wpan_executable.gni")
+
+declare_args() {
+  wpan_sdk_debug = false
+}
+
+display_oled_ssd1306_dir = "repos/display-oled-ssd1306"
+emwin_dir = "repos/emwin"
+optiga_trust_m_dir = "repos/optiga-trust-m"
+wpan_sdk_dir = "repos/wpan-sdk"
+
+group("matter_wpan_sdk") {
+  public_deps = [
+    ":wpan_sdk",
+    "//:wpan_example",
+  ]
+}
+
+template("wpan_sdk") {
+  forward_variables_from(invoker,
+                         [
+                           "board",
+                           "chip",
+                           "chip_family",
+                         ])
+
+  static_library(target_name) {
+    if (invoker.board_use_external_flash) {
+      btp = btp_ota_disabled
+    } else {
+      btp = btp_ota_enabled
+    }
+
+    sources = [
+      "${wpan_sdk_dir}/hal/source/ota_fw_upgrade.c",
+      "${wpan_sdk_dir}/hal/source/platform_random.c",
+      "${wpan_sdk_dir}/hal/source/spar_setup.c",
+      "${wpan_sdk_dir}/hal/source/wiced_button_manager.c",
+      "${wpan_sdk_dir}/hal/source/wiced_led_manager.c",
+      "${wpan_sdk_dir}/hal/source/wiced_platform.c",
+      "${wpan_sdk_dir}/hal/source/wiced_platform_bt_cfg.c",
+      "${wpan_sdk_dir}/hal/source/wiced_platform_memory.c",
+      "${wpan_sdk_dir}/pdl/led/platform_led.c",
+      "${wpan_sdk_dir}/pdl/serial_flash/cy_serial_flash.c",
+    ]
+
+    if (invoker.board_enable_i2c) {
+      sources += [ "${wpan_sdk_dir}/hal/source/cyhal_i2c.c" ]
+    }
+
+    defines = [
+      "BLE_OTA_FW_UPGRADE=1",
+      "CHIP_HAVE_CONFIG_H=1",
+      "CY_PLATFORM_SWDCK=${invoker.board_swclk_pin}",
+      "CY_PLATFORM_SWDIO=${invoker.board_swdio_pin}",
+      "ENABLE_DEBUG=${wpan_sdk_debug}",
+      "SPAR_CRT_SETUP=${cyw30739_sdk_crt_entry}",
+      "XS_LOCATION_ACTIVE=${btp.ConfigXS1Location}",
+      "XS_LOCATION_UPGRADE=${btp.ConfigXS2Location}",
+    ]
+
+    configs += [
+      ":wpan_sdk-config",
+      ":wpan_sdk-${chip_family}-config",
+    ]
+
+    deps = [
+      "cyw30739:${chip}",
+      "cyw30739:mbedtls-${chip}",
+    ]
+
+    public_deps = [
+      ":${board}",
+      ":wpan_sdk",
+      ":wpan_sdk-pal-libc-${board}",
+    ]
+
+    if (invoker.board_enable_display) {
+      public_deps += [
+        ":display_oled_ssd1306",
+        ":emwin",
+        ":wpan_sdk-pal-emwin",
+        ":wpan_sdk-pdl-hdc2010-${board}",
+      ]
+    }
+
+    if (invoker.board_use_optiga) {
+      public_deps += [ ":wpan_sdk-pal-optiga-${board}" ]
+    }
+  }
+
+  static_library("wpan_sdk-pal-libc-${board}") {
+    sources = [
+      "${wpan_sdk_dir}/pal/libc/platform_retarget_lock.c",
+      "${wpan_sdk_dir}/pal/libc/platform_retarget_lock.h",
+      "${wpan_sdk_dir}/pal/libc/platform_stdio.c",
+    ]
+
+    configs += [ ":wpan_sdk-${chip_family}-config" ]
+
+    public_configs = [ ":${target_name}-config" ]
+  }
+
+  config("wpan_sdk-pal-libc-${board}-config") {
+    include_dirs = [ "${wpan_sdk_dir}/pal/libc" ]
+
+    ldflags = [
+      "-Wl,--whole-archive",
+      rebase_path("${target_out_dir}/lib/wpan_sdk-pal-libc-${board}.a",
+                  root_build_dir),
+      "-Wl,--no-whole-archive",
+    ]
+  }
+
+  static_library("wpan_sdk-pdl-hdc2010-${board}") {
+    sources = [
+      "${wpan_sdk_dir}/pdl/hdc2010/hdc2010.c",
+      "${wpan_sdk_dir}/pdl/hdc2010/hdc2010.h",
+    ]
+
+    configs += [
+      ":wpan_sdk-${chip_family}-config",
+      ":wpan_sdk-config",
+    ]
+
+    public_configs = [ ":${target_name}-config" ]
+  }
+
+  config("wpan_sdk-pdl-hdc2010-${board}-config") {
+    include_dirs = [ "${wpan_sdk_dir}/pdl/hdc2010" ]
+  }
+
+  static_library("wpan_sdk-pal-optiga-${board}") {
+    sources = [
+      "${wpan_sdk_dir}/pal/optiga/pal.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_gpio.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_i2c.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_ifx_i2c_config.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_logger.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_os_datastore.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_os_event.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_os_lock.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_os_memory.c",
+      "${wpan_sdk_dir}/pal/optiga/pal_os_timer.c",
+      "${wpan_sdk_dir}/pal/optiga/wiced_optiga.c",
+    ]
+
+    configs += [
+      ":wpan_sdk-config",
+      ":wpan_sdk-cyw30739-config",
+    ]
+
+    public_configs = [ ":${target_name}-config" ]
+
+    deps = [
+      ":${board}",
+      ":optiga-trust-m-${board}",
+      "cyw30739:mbedtls-${chip}",
+    ]
+  }
+
+  config("wpan_sdk-pal-optiga-${board}-config") {
+    include_dirs = [ "${optiga_trust_m_dir}/optiga/include/" ]
+  }
+
+  static_library("optiga-trust-m-${board}") {
+    sources = [
+      "${optiga_trust_m_dir}/optiga/cmd/optiga_cmd.c",
+      "${optiga_trust_m_dir}/optiga/common/optiga_lib_common.c",
+      "${optiga_trust_m_dir}/optiga/common/optiga_lib_logger.c",
+      "${optiga_trust_m_dir}/optiga/comms/ifx_i2c/ifx_i2c.c",
+      "${optiga_trust_m_dir}/optiga/comms/ifx_i2c/ifx_i2c_config.c",
+      "${optiga_trust_m_dir}/optiga/comms/ifx_i2c/ifx_i2c_data_link_layer.c",
+      "${optiga_trust_m_dir}/optiga/comms/ifx_i2c/ifx_i2c_physical_layer.c",
+      "${optiga_trust_m_dir}/optiga/comms/ifx_i2c/ifx_i2c_presentation_layer.c",
+      "${optiga_trust_m_dir}/optiga/comms/ifx_i2c/ifx_i2c_transport_layer.c",
+      "${optiga_trust_m_dir}/optiga/comms/optiga_comms_ifx_i2c.c",
+      "${optiga_trust_m_dir}/optiga/crypt/optiga_crypt.c",
+      "${optiga_trust_m_dir}/optiga/util/optiga_util.c",
+      "${optiga_trust_m_dir}/pal/pal_crypt_mbedtls.c",
+    ]
+
+    public_configs = [ ":${target_name}-config" ]
+
+    configs += [ ":wpan_sdk-cyw30739-config" ]
+
+    deps = [ "cyw30739:mbedtls" ]
+
+    cflags = [ "-Wno-implicit-fallthrough" ]
+  }
+
+  config("optiga-trust-m-${board}-config") {
+    include_dirs = [ "${optiga_trust_m_dir}/optiga/include/" ]
+  }
+}
+
+config("btsdk_include-config") {
+  include_dirs = [ "repos/btsdk-include" ]
+}
+
+static_library("wpan_sdk") {
+  sources = [
+    "${wpan_sdk_dir}/hal/include/ota_fw_upgrade.h",
+    "${wpan_sdk_dir}/hal/include/platform_nvram.h",
+    "${wpan_sdk_dir}/hal/include/wiced_button_manager.h",
+    "${wpan_sdk_dir}/hal/include/wiced_led_manager.h",
+    "${wpan_sdk_dir}/hal/include/wiced_platform_bt_cfg.h",
+    "${wpan_sdk_dir}/hal/source/wiced_platform_os.c",
+    "${wpan_sdk_dir}/pdl/epa/platform_epa.c",
+  ]
+
+  public_configs = [
+    ":wpan_sdk-config",
+    ":btsdk_include-config",
+  ]
+  configs += [ "cyw30739:mbedtls_config" ]
+}
+
+config("wpan_sdk-config") {
+  include_dirs = [
+    "${wpan_sdk_dir}/hal/include",
+    "${wpan_sdk_dir}/pal/optiga",
+    "${wpan_sdk_dir}/pdl/epa",
+    "${wpan_sdk_dir}/pdl/led",
+    "${wpan_sdk_dir}/pdl/serial_flash",
+  ]
+}
+
+source_set("wpan_sdk-cyw30739") {
+  sources = [ "${wpan_sdk_dir}/hal/include/30739/auto_flags.h" ]
+
+  public_configs = [ ":${target_name}-config" ]
+}
+
+config("wpan_sdk-cyw30739-config") {
+  include_dirs = [
+    "${wpan_sdk_dir}/hal/include/30739",
+    "${wpan_sdk_dir}/hal/include/30739/hal",
+    "${wpan_sdk_dir}/hal/include/30739/internal",
+    "${wpan_sdk_dir}/hal/include/30739/stack",
+  ]
+}
+
+static_library("wpan_sdk-pal-emwin") {
+  sources = [
+    "${wpan_sdk_dir}/pal/emwin/configs/GUI_X.c",
+    "${wpan_sdk_dir}/pal/emwin/configs/LCDConf.c",
+  ]
+
+  configs += [ ":wpan_sdk-config" ]
+
+  deps = [
+    ":display_oled_ssd1306",
+    ":emwin",
+    ":wpan_sdk-pdl-display_oled_ssd1306",
+  ]
+}
+
+config("wpan_sdk-pal-mbedtls-config") {
+  include_dirs = [ "${wpan_sdk_dir}/pal/mbedtls/include" ]
+}
+
+static_library("wpan_sdk-pdl-display_oled_ssd1306") {
+  sources =
+      [ "${wpan_sdk_dir}/pdl/display-oled-ssd1306/display-oled-ssd1306.c" ]
+
+  configs += [ ":wpan_sdk-config" ]
+
+  public_configs = [ ":${target_name}-config" ]
+
+  deps = [ ":display_oled_ssd1306" ]
+}
+
+config("wpan_sdk-pdl-display_oled_ssd1306-config") {
+  include_dirs = [ "${wpan_sdk_dir}/pdl/display-oled-ssd1306" ]
+}
+
+static_library("display_oled_ssd1306") {
+  defines = [ "CY_NO_ASSERT=1" ]
+
+  sources = [
+    "${display_oled_ssd1306_dir}/configs/emwin/GUIConf.c",
+    "${display_oled_ssd1306_dir}/mtb_ssd1306.c",
+  ]
+
+  configs += [ ":wpan_sdk-config" ]
+
+  public_configs = [ ":${target_name}-config" ]
+
+  deps = [ ":emwin" ]
+}
+
+config("display_oled_ssd1306-config") {
+  include_dirs = [
+    "${display_oled_ssd1306_dir}",
+    "${display_oled_ssd1306_dir}/configs/emwin",
+  ]
+
+  defines = [ "COMPONENT_EMWIN_NOSNTS=1" ]
+}
+
+static_library("emwin") {
+  public_configs = [ ":${target_name}-config" ]
+
+  libs = [ "${emwin_dir}/GUI/COMPONENT_HARDFP/COMPONENT_EMWIN_NOSNTS/TOOLCHAIN_GCC_ARM/libemWin_nosnts_cm4f_gcc.a" ]
+}
+
+config("emwin-config") {
+  include_dirs = [
+    "${emwin_dir}/GUI/COMPONENT_HARDFP/COMPONENT_EMWIN_NOSNTS",
+    "${emwin_dir}/GUI/Include",
+  ]
+}
+
+template("matter_wpan_board") {
+  forward_variables_from(invoker, [ "board" ])
+  import("boards/${board}/args.gni")
+
+  board_dir = "${chip_family}/repos/${board}"
+  chip_dir = "${cyw30739_sdk_build_root}/repos/${chip}/COMPONENT_${chip}"
+  patch_dir =
+      "${chip_dir}/internal/${chip}/patches_" + string_replace(board, "-", "_")
+  patch_sym_file = "${patch_dir}/patch.sym"
+
+  action("gen_board_configs-${board}") {
+    design_modus = "boards/${board}/design.modus"
+    output_dir = "${target_gen_dir}/${board}"
+
+    script = "${build_root}/gn_run_binary.py"
+
+    outputs = [
+      "${output_dir}/cycfg.c",
+      "${output_dir}/cycfg.h",
+      "${output_dir}/cycfg_notices.h",
+      "${output_dir}/cycfg_pins.c",
+      "${output_dir}/cycfg_pins.h",
+      "${output_dir}/cycfg_routing.h",
+    ]
+
+    sources = [ design_modus ]
+
+    args = [
+      "${mtb_tools_path}/device-configurator/device-configurator-cli",
+      "--output-dir",
+      rebase_path(output_dir, root_build_dir),
+      "--library",
+      rebase_path("${chip_dir}/devicesupport.xml", root_build_dir),
+      "--build",
+      rebase_path(design_modus, root_build_dir),
+      "--readonly",
+    ]
+  }
+
+  static_library(target_name) {
+    sources = get_target_outputs(":gen_board_configs-${board}")
+    sources += [ "${board_dir}/wiced_platform.h" ]
+
+    configs += [ ":wpan_sdk-${chip_family}-config" ]
+
+    deps = [ ":gen_board_configs-${board}" ]
+
+    public_configs = [ ":${target_name}-config" ]
+  }
+
+  config("${target_name}-config") {
+    defines = board_defines
+
+    if (board_enable_display) {
+      defines += [ "BOARD_ENABLE_DISPLAY=1" ]
+    }
+
+    if (board_enable_i2c) {
+      defines += [ "BOARD_ENABLE_I2C=1" ]
+    }
+
+    if (board_use_external_flash) {
+      defines += [ "BOARD_USE_EXTERNAL_FLASH=1" ]
+    }
+
+    if (board_use_optiga) {
+      defines += [ "BOARD_ENABLE_OPTIGA=1" ]
+    }
+
+    ldflags = [
+      "-Wl,--entry=${cyw30739_sdk_crt_entry}",
+      "-Wl,--just-symbols=" + rebase_path(patch_sym_file, root_build_dir),
+      "-nostartfiles",
+    ]
+
+    include_dirs = [
+      board_dir,
+      get_label_info(":gen_board_configs-${board}", "target_gen_dir") +
+          "/${board}",
+    ]
+  }
+
+  wpan_sdk("wpan_sdk-${board}") {
+  }
+
+  ifx_openthread("openthread-${board}") {
+  }
+}
+
+foreach(board, matter_wpan_sdk_board_list) {
+  matter_wpan_board(board) {
+  }
+}
