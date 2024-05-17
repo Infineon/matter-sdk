@@ -38,9 +38,6 @@
 [submodule "emwin"]
 	path = repos/emwin
 	url = https://github.com/Infineon/emwin.git
-[submodule "optiga-trust-m"]
-	path = repos/optiga-trust-m
-	url = https://github.com/Infineon/optiga-trust-m.git
 [submodule "wpan-sdk"]
 	path = repos/wpan-sdk
 	url = https://github.com/Infineon/wpan-sdk.git

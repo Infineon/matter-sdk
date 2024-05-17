@@ -14,6 +14,7 @@
 
 import("//build_overrides/chip.gni")
 
+import("${chip_root}/src/platform/Infineon/CYW30739/cyw30739_platform.gni")
 import("${chip_root}/third_party/openthread/platforms/ifx/ifx_openthread.gni")
 import("cyw30739/cyw30739_sdk.gni")
 import("matter_wpan_executable.gni")
@@ -24,7 +25,6 @@ declare_args() {
 
 display_oled_ssd1306_dir = "repos/display-oled-ssd1306"
 emwin_dir = "repos/emwin"
-optiga_trust_m_dir = "repos/optiga-trust-m"
 wpan_sdk_dir = "repos/wpan-sdk"
 
 group("matter_wpan_sdk") {
@@ -198,6 +198,8 @@ template("wpan_sdk") {
       "${optiga_trust_m_dir}/pal/pal_crypt_mbedtls.c",
     ]
 
+    defines = [ "IFX_I2C_FRAME_SIZE=63" ]
+
     public_configs = [ ":${target_name}-config" ]
 
     configs += [ ":wpan_sdk-cyw30739-config" ]
@@ -235,6 +237,12 @@ static_library("wpan_sdk") {
 }
 
 config("wpan_sdk-config") {
+  defines = []
+
+  if (use_provisioned_optiga) {
+    defines += [ "USE_PROVISIONED_OPTIGA=1" ]
+  }
+
   include_dirs = [
     "${wpan_sdk_dir}/hal/include",
     "${wpan_sdk_dir}/pal/optiga",
@@ -396,7 +404,15 @@ template("matter_wpan_board") {
     }
 
     if (board_use_optiga) {
-      defines += [ "BOARD_ENABLE_OPTIGA=1" ]
+      defines += [
+        "BOARD_USE_OPTIGA=1",
+        "OPTIGA_SECRET_OBJECT_ID=${optiga_secret_object_id}",
+        "OPTIGA_DAC_OBJECT_ID=${optiga_dac_object_id}",
+        "OPTIGA_DAC_KEY_OBJECT_ID=${optiga_dac_key_object_id}",
+        "OPTIGA_PAI_CERT_OBJECT_ID=${optiga_pai_cert_object_id}",
+      ]
+
+      configs = [ ":optiga-trust-m-${board}-config" ]
     }
 
     ldflags = [
@@ -416,6 +432,9 @@ template("matter_wpan_board") {
   }
 
   ifx_openthread("openthread-${board}") {
+  }
+
+  cyw30739_platform("cyw30739_platform-${board}") {
   }
 }
 

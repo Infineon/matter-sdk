@@ -60,6 +60,21 @@ declare_args() {
 
   # Supported board list
   matter_wpan_sdk_board_list = []
+
+  # Use a provisioned Optiga.
+  use_provisioned_optiga = false
+
+  # Optiga object ID for the shared secret.
+  optiga_secret_object_id = "0xf1d1"
+
+  # Optiga object ID for the DAC.
+  optiga_dac_object_id = "0xe0e3"
+
+  # Optiga object ID for the DAC key.
+  optiga_dac_key_object_id = "0xe0f2"
+
+  # Optiga object ID for the PAI certificate.
+  optiga_pai_cert_object_id = "0xe0e8"
 }
 
 matter_wpan_sdk_script_dir = "${matter_wpan_sdk_build_root}/scripts"

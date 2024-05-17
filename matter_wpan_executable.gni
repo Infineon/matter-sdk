@@ -50,7 +50,7 @@ template("matter_wpan_executable") {
     public_configs = [ ":${target_name}-config" ]
 
     deps = [
-      "${cyw30739_sdk_build_root}:platform-${chip}",
+      "${matter_wpan_sdk_build_root}:cyw30739_platform-${board}",
       "${matter_wpan_sdk_build_root}:openthread-${board}",
     ]
 

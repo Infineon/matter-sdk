@@ -159,6 +159,9 @@ template("cyw30739_sdk_post_build") {
   action("${target_name}_gen_ss_hex") {
     config_header =
         "${chip_root}/src/platform/Infineon/CYW30739/CYW30739Config.h"
+    optiga_cddl = "${matter_wpan_sdk_script_dir}/optiga_v3.cddl"
+    optiga_provisioning_data_script =
+        "${matter_wpan_sdk_script_dir}/gen_optiga_provisioning_data.py"
 
     script = "${matter_wpan_sdk_script_dir}/gen_ss_hex.py"
 
@@ -168,12 +171,15 @@ template("cyw30739_sdk_post_build") {
       config_header,
       matter_att_cert,
       matter_cd,
+      optiga_cddl,
+      optiga_provisioning_data_script,
       ss_skeleton_hex,
     ]
 
     args = [
       "--output=" + rebase_path(ss_hex, root_build_dir),
       "--ss_skeleton_hex=" + rebase_path(ss_skeleton_hex, root_build_dir),
+      "--vs_location=${btp.DLConfigVSLocation}",
       "--att_cert=" + rebase_path(matter_att_cert, root_build_dir),
       "--config_header=" + rebase_path(config_header, root_build_dir),
       "--config=VendorName:string:${matter_vendor_name}",
@@ -188,9 +194,6 @@ template("cyw30739_sdk_post_build") {
       "--config=Spake2pIterationCount:uint32:${matter_pake_iteration_count}",
       "--config=Spake2pSalt:base64:${pake.salt}",
       "--config=Spake2pVerifier:base64:${pake.verifier}",
-      "--config=DAC:att-cert:dac",
-      "--config=DACKey:att-cert:dac-key",
-      "--config=PAICert:att-cert:pai-cert",
       "--config=CertDeclaration:octets:" +
           rebase_path(matter_cd, root_build_dir),
     ]
@@ -203,6 +206,39 @@ template("cyw30739_sdk_post_build") {
     }
     if (matter_att_cert_password != "") {
       args += [ "--att_cert_password=" + matter_att_cert_password ]
+    }
+
+    if (invoker.board_use_optiga) {
+      if (!use_provisioned_optiga) {
+        provisioning_args = [
+          "--att_cert=" + rebase_path(matter_att_cert, root_build_dir),
+          "--secret_object_id=${optiga_secret_object_id}",
+          "--dac_object_id=${optiga_dac_object_id}",
+          "--dac_key_object_id=${optiga_dac_key_object_id}",
+          "--label=Cert",
+          "--cddl=" + rebase_path(optiga_cddl, root_build_dir),
+        ]
+        provisioning_data = exec_script(optiga_provisioning_data_script,
+                                        provisioning_args,
+                                        "scope")
+
+        args += [
+          "--config=ProvisioningDAC:att-cert:dac",
+          "--config=ProvisioningPAICert:att-cert:pai-cert",
+          "--config=ProvisioningSecret:base64:${provisioning_data.secret}",
+          "--config=ProvisioningSecretMetaData:base64:${provisioning_data.secret_metadata}",
+          "--config=ProvisioningDACMetaData:base64:${provisioning_data.trust_anchor_metadata}",
+          "--config=ProvisioningDACKeyMetaData:base64:${provisioning_data.key_metadata}",
+          "--config=ProvisioningManifest:base64:${provisioning_data.manifest}",
+          "--config=ProvisioningFragment:base64:${provisioning_data.fragment}",
+        ]
+      }
+    } else {
+      args += [
+        "--config=DAC:att-cert:dac",
+        "--config=DACKey:att-cert:dac-key",
+        "--config=PAICert:att-cert:pai-cert",
+      ]
     }
 
     deps = [ ":${invoker.target_name}_gen_ss_skeleton_hex" ]

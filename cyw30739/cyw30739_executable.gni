@@ -67,6 +67,7 @@ template("cyw30739_executable") {
     forward_variables_from(invoker,
                            [
                              "board_use_external_flash",
+                             "board_use_optiga",
                              "board_external_flash_ota_upgrade_size",
                              "patch_dir",
                              "platform_dir",

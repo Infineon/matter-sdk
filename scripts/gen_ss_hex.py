@@ -40,13 +40,14 @@ from intelhex import IntelHex
 
 THREAD_FACTORY_KEY_BASE = 0x2000
 MATTER_FACTORY_KEY_BASE = 0x2100
+MATTER_CONFIG_KEY_BASE = 0x0600
 
 
 def main():
     args = parse_args()
 
     configs = gen_thread_factory_config()
-    configs.update(gen_matter_factory_config(args.config_header))
+    configs.update(parse_matter_config(args.config_header))
 
     try:
         att_cert = load_att_cert(args.att_cert, args.att_cert_password)
@@ -57,6 +58,11 @@ def main():
     parse_config_args(configs, args.config, att_cert)
 
     ss_hex = insert_config(IntelHex(str(args.ss_skeleton_hex)), configs)
+
+    vs_data = create_vs_data(configs)
+    if vs_data:
+        ss_hex.puts(args.vs_location, vs_data)
+
     ss_hex.write_hex_file(args.output)
 
     return 0
@@ -66,6 +72,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--ss_skeleton_hex", required=True, type=pathlib.Path)
+    parser.add_argument("--vs_location", required=True,
+                        type=lambda x: int(x, 0))
     parser.add_argument("--config_header", required=True, type=pathlib.Path)
     parser.add_argument("--config", action="append", type=str)
     parser.add_argument("--att_cert", required=True, type=pathlib.Path)
@@ -77,17 +85,17 @@ def parse_args():
 def gen_thread_factory_config() -> OrderedDict:
     configs = OrderedDict()
     configs["ExtendedAddress"] = {
-        "key": THREAD_FACTORY_KEY_BASE, "value": os.urandom(8)}
+        "key_type": "Factory", "key": THREAD_FACTORY_KEY_BASE, "value": os.urandom(8)}
     return configs
 
 
-def gen_matter_factory_config(path: pathlib.Path) -> OrderedDict:
+def parse_matter_config(path: pathlib.Path) -> OrderedDict:
     # compile the regex for extracting name and key of factory configurations.
     factory_config_re = re.compile(r"""
       .*                    # Prefix
       kConfigKey_(\w+)      # Parse the config name
       \s*=.*                # Allow spaces
-      kChipFactory_KeyBase  # Only match factory configurations
+      kChip(\w+)_KeyBase    # Parse the key type
       \s*,\s*               # Allow spaces
       (0x[0-9a-fA-F]+)      # Parse the config key
     """, re.VERBOSE)
@@ -98,8 +106,14 @@ def gen_matter_factory_config(path: pathlib.Path) -> OrderedDict:
             match = factory_config_re.match(line.strip())
             if match:
                 name = match[1]
-                key = MATTER_FACTORY_KEY_BASE + int(match[2], 0)
-                configs[name] = {"key": key}
+                key_type = match[2]
+                key = int(match[3], 0)
+
+                configs[name] = {"key_type": key_type}
+                if key_type == "Factory":
+                    configs[name]["key"] = MATTER_FACTORY_KEY_BASE + key
+                elif key_type == "Config":
+                    configs[name]["key"] = MATTER_CONFIG_KEY_BASE + key
     return configs
 
 
@@ -181,7 +195,7 @@ def insert_config(origin_hex: IntelHex, configs: OrderedDict):
     signature, _, _ = unpack("<8sLL", origin_ss_header)
 
     ss_data = bytearray()
-    for config in configs.values():
+    for config in [c for c in configs.values() if c["key_type"] == "Factory"]:
         if "value" in config:
             ss_data += config["key"].to_bytes(2, byteorder="little")
             ss_data += leb128.u.encode(len(config["value"]))
@@ -193,6 +207,38 @@ def insert_config(origin_hex: IntelHex, configs: OrderedDict):
     ss_hex = IntelHex()
     ss_hex.puts(ss_segment[0], ss_header + ss_data)
     return ss_hex
+
+
+def create_vs_data(configs: OrderedDict) -> typing.Optional[bytes]:
+    vs_configs = [c for c in configs.values() if c["key_type"] ==
+                  "Config" and "value" in c]
+    if len(vs_configs) == 0:
+        return None
+
+    data = pack("<LL", 0xffffffff, 0xaa55ffff)
+
+    for config in vs_configs:
+        header = pack("<LLH", 0xffffffff, config["key"], len(config["value"]))
+        payload_checksum = calculate_vs_checksum(config["value"])
+        header_checksum = calculate_vs_checksum(
+            header[4:] + pack("B", payload_checksum))
+        payload_with_padding = config["value"].ljust(
+            round_to_multiple(len(config["value"]), 4), b"\xff")
+        data += header + pack("BB", header_checksum,
+                              payload_checksum) + payload_with_padding
+
+    return data
+
+
+def calculate_vs_checksum(payload: bytes) -> int:
+    checksum = 0
+    for byte in payload:
+        checksum += byte
+    return (checksum ^ 0x55) & 0xff
+
+
+def round_to_multiple(value: int, multiple: int) -> int:
+    return (value + multiple - 1) & ~(multiple - 1)
 
 
 if __name__ == "__main__":
